@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 import Sprockell.System
 import Sprockell.TypesEtc
 import Data.Int
@@ -72,7 +73,8 @@ compile (x:xs) c s = case x of
                   '.' -> [Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegD,
                       Write RegD (Addr 0x1000000)] ++ compile xs c s
                   '<' -> [Const 3 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegA,
-                      Branch RegA (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
+                      Load (Deref RegA) RegD, Const root RegE, Compute Sub RegE RegD RegE,
+                      Branch RegE (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
                       EndProg] ++ compile xs c s
                   '>' -> [Const 2 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegA,
                       Branch RegA (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
@@ -83,6 +85,7 @@ compile (x:xs) c s = case x of
                       Const 2 RegD, Compute Add RegD RegC RegD, Store RegA (Deref RegD), --Store current node as parent
                       Const 7 RegD, Compute Add RegD RegC RegD, Store RegC (Deref RegD), --Store TMNode as begin in TapeNode
                       Const 3 RegD, Compute Add RegD RegC RegD, Store RegD (Deref RegC), --Store first tapenode as first in tmnode
+                      Const root RegE, Store RegE (Deref RegD),                          --New node is root type
                       Const t RegE, Store RegE (Deref RegA),                             --Store the new type in current node
                       Const 1 RegE, Compute Add RegE RegA RegE, Store RegD (Deref RegE), --Store the new node as value
                       Const 8 RegD, Compute Add RegC RegD RegC,                          --Updating RegC
@@ -90,7 +93,8 @@ compile (x:xs) c s = case x of
                       Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegA] ++ compile xs c s
                   '&' -> [Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref RegA) RegA,
                       Const 2 RegD, Compute Add RegD RegA RegA, Load (Deref RegA) RegA] ++ compile xs c s
-                  '|' -> [Branch RegA (Rel 8), Const b RegD, Store RegD (Deref RegA),
+                  '|' -> [Load (Deref RegA) RegD, Const root RegE, Compute Sub RegE RegD RegE,
+                      Branch RegE (Rel 8), Const b RegD, Store RegD (Deref RegA),
                       Const 1 RegD, Compute Add RegD RegA RegD, Const x2 RegE,
                       Store RegE (Deref RegD), Jump (Rel 4),
                       Const 2 RegD, Write RegD (Addr 0x1000000), EndProg] ++ compile (tail xs) c s
@@ -104,8 +108,10 @@ compile (x:xs) c s = case x of
                       Store RegD (Deref RegE),                                           --Set Next new node
                       Const 3 RegE, Compute Add RegE RegD RegD, Store RegC (Deref RegD), --Set previous node c
                       Const 2 RegD, Compute Add RegA RegD RegD, Store RegC (Deref RegD), --Next old node
+                      Const root RegD, Store RegD (Deref RegC),                          --Set new node to type root
                       Const 5 RegD, Compute Add RegD RegC RegC] ++ compile xs c s
-                  '!' -> [Const 3 RegD, Compute Add RegA RegD RegD, Branch RegD (Rel 4),
+                  '!' -> [Const 3 RegD, Compute Add RegA RegD RegD,
+                      Load (Deref RegD) RegD, Branch RegD (Rel 4),
                       Const 3 RegD, Write RegD (Addr 0x1000000), EndProg,
                       Const 2 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegD,
                       Const 3 RegE, Compute Add RegD RegE RegD, Compute Add RegE RegA RegE,
@@ -127,6 +133,7 @@ compile (x:xs) c s = case x of
                       Const 3 RegE, Compute Add RegE PC RegE, Push RegE,
                       Jump (Ind RegD)] ++ compile xs c s
                   where b = fromIntegral (getTableAddress "b" c)
+                        root = fromIntegral (getTableAddress "" c)
                         t = fromIntegral (getTableAddress s c)
                         x2 = fromIntegral (ord (head xs))
                         whileLoop = compile (findWhileLoop xs 0) c s
@@ -140,9 +147,7 @@ compile (x:xs) c s = case x of
                         comment = drop (findNext xs '%' + 1) xs
                         fAddress = fromIntegral (getFunctionAddress x c)
 
-compileFunction c ("b",xs) = [Branch RegA (Rel 4),
-                          Const b RegD, Store RegD (Deref RegA), Jump (Rel 4),
-                          Const 3 RegD, Write RegD (Addr 0x1000000), EndProg,
+compileFunction c ("b",xs) = [Const b RegD, Store RegD (Deref RegA),
                           Pop RegD, Jump (Ind RegD)]
                 where b = fromIntegral (getTableAddress "b" c)
 compileFunction c ("b+",xs) = [Const 1 RegD, Compute Add RegA RegD RegE, Load (Deref RegE) RegE,
@@ -180,9 +185,14 @@ makeBlock c f = setBlock (getTableAddress f c) (map ((getFunctionOffsetByIndex c
 
 compileBlocks c = concat (map (makeBlock c) (map fst (("",""):(getFunctions c))))
 
+debug :: SystemState -> String
+debug SysState{..}  = show ((regbank (sprs!!0))!PC) ++ "\n"
 
 link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
-          [Const (fromIntegral (256+(bs)+8)) RegC, Const (fromIntegral (256+(bs))) RegA] ++ (compileBlocks c) ++
+          [Const (fromIntegral (256+(bs)+8)) RegC,
+           Const (fromIntegral (256+(bs))) RegA,
+           Const (fromIntegral (getTableAddress "" c)) RegD,
+           Store RegD (Deref RegA)] ++ (compileBlocks c) ++
           (compile c c "") ++ [EndProg]
       where functions = (concat $ compileFunctions c)
             bs = getTableAllocation c
