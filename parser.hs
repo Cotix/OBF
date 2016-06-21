@@ -122,7 +122,7 @@ compile (x:xs) c s = case x of
                       ] ++ compile xs c s
                   '[' -> [Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegD,
                       Branch RegD (Rel 2), Jump (Rel (whileLoopLen + 1))] ++ whileLoop ++
-                      [Jump (Rel (0-(whileLoopLen + 5)))] ++ compile whileLoopXs c s
+                      [Jump (Rel (0-(whileLoopLen + 4)))] ++ compile whileLoopXs c s
                   ']' -> error "Brackets are mismatched: Illegal ']' found \n"
                   '(' -> [Const 1 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegD,
                       Branch RegD (Rel ifLoopLen)] ++ ifLoop ++ compile ifLoopXs c s
