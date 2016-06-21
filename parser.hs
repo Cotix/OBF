@@ -73,8 +73,7 @@ compile (x:xs) c s = case x of
                   '.' -> [Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegD,
                       Write RegD (Addr 0x1000000)] ++ compile xs c s
                   '<' -> [Const 3 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegA,
-                      Load (Deref RegA) RegD, Const root RegE, Compute Sub RegE RegD RegE,
-                      Branch RegE (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
+                      Branch RegA (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
                       EndProg] ++ compile xs c s
                   '>' -> [Const 2 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegA,
                       Branch RegA (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
