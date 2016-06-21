@@ -100,8 +100,7 @@ compile (x:xs) c s = case x of
                   '@' -> [Compute Add RegA Zero RegB] ++ compile xs c s
                   '$' -> [Compute Add RegA Zero RegD, Compute Add RegB Zero RegA,
                       Compute Add RegD Zero RegB] ++ compile xs c s
-                  '?' -> [Const 2 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegE,
-                      Const 3 RegD, Compute Add RegD RegC RegD, Store RegE (Deref RegD), --Previous new node
+                  '?' -> [Const 3 RegD, Compute Add RegD RegC RegD, Store RegA (Deref RegD), --Previous new node
                       Const 2 RegD, Compute Add RegA RegD RegD, Const 2 RegE,
                       Compute Add RegC RegE RegE, Load (Deref RegD) RegD,
                       Store RegD (Deref RegE),                                           --Set Next new node
@@ -136,10 +135,10 @@ compile (x:xs) c s = case x of
                         t = fromIntegral (getTableAddress s c)
                         x2 = fromIntegral (ord (head xs))
                         whileLoop = compile (findWhileLoop xs 0) c s
-                        whileLoopXs = drop (length whileLoop + 1) xs
+                        whileLoopXs = drop (length (findWhileLoop xs 0) + 1) xs
                         whileLoopLen = fromIntegral (length whileLoop + 1)
                         ifLoop = compile (findIfLoop xs 0) c s
-                        ifLoopXs = drop (length ifLoop + 1) xs
+                        ifLoopXs = drop (length (findIfLoop xs 0) + 1) xs
                         ifLoopLen = fromIntegral (length ifLoop +1)
                         def1 = drop (findNext xs ':' + 1) xs
                         def = drop (findNext def1 ':' +1) def1
