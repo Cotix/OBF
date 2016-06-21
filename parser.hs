@@ -81,7 +81,7 @@ compile (x:xs) c s = case x of
                       EndProg] ++ compile xs c s
                   '^' -> [Store Zero (Deref RegA), Const 1 RegD, Compute Add RegD RegA RegD,
                       Store Zero (Deref RegD)] ++ compile xs c s
-                  '*' -> [Load (Deref RegA) RegD, Branch RegD (Rel 18), Const t RegD,
+                  '*' -> [Load (Deref RegA) RegD, Branch RegD (Rel 20), Const t RegD,
                       Const 2 RegD, Compute Add RegD RegC RegD, Store RegA (Deref RegD), --Store current node as parent
                       Const 7 RegD, Compute Add RegD RegC RegD, Store RegC (Deref RegD), --Store TMNode as begin in TapeNode
                       Const 3 RegD, Compute Add RegD RegC RegD, Store RegD (Deref RegC), --Store first tapenode as first in tmnode
