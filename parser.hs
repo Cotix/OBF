@@ -51,6 +51,7 @@ getCallLetters xs = (unique ( map (last . fst ) (getFunctions xs)))
 
 getFunctionByScope :: String -> [Function] -> Op -> String
 getFunctionByScope xs fs f  | elem (xs++[f]) (map fst fs) = xs++[f]
+                            | xs == "" = ""
                             | otherwise = getFunctionByScope (init xs) fs f
 getTableAllocation :: Code -> Int
 getTableAllocation c = (length (getFunctions c) + 1 ) * (length $ getCallLetters c)
@@ -68,6 +69,8 @@ compile (x:xs) c s = case x of
                       Read (Addr 0x1000000), Receive RegD, Const b RegE,
                       Store RegE (Deref RegA),Const 1 RegE, Compute Add RegA RegE RegE,
                       Store RegD (Deref RegE)] ++ compile xs c s
+                  '.' -> [Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegD,
+                      Write RegD (Addr 0x1000000)] ++ compile xs c s
                   '<' -> [Const 3 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegA,
                       Branch RegA (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
                       EndProg] ++ compile xs c s
@@ -166,12 +169,20 @@ setBlock a [] = []
 setBlock a (v:vs) = [Const (fromIntegral v) RegD,
                     Store RegD (Addr(fromIntegral a))] ++ setBlock (a+1) vs
 
-makeBlock c f = setBlock (getTableAddress f c) (map ((getFunctionOffsets c)!!) fIndex)
+
+getFunctionOffsetByIndex c (-1) = -1
+getFunctionOffsetByIndex c i = (getFunctionOffsets c)!!i
+
+makeBlock c f = setBlock (getTableAddress f c) (map ((getFunctionOffsetByIndex c)) fIndex)
                 where
                   functions = map (getFunctionByScope f (getFunctions c)) (getCallLetters c)
                   fIndex = map (+(-1)) (map (findFunctionIndex (getFunctions c)) (functions))
 
 compileBlocks c = concat (map (makeBlock c) (map fst (("",""):(getFunctions c))))
 
-link c = [Jump (Rel (fromIntegral( length functions)))] ++ functions ++ (compileBlocks c) ++ (compile c c "")
+
+link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
+          [Const (fromIntegral (256+(bs)+8)) RegC, Const (fromIntegral (256+(bs))) RegA] ++ (compileBlocks c) ++
+          (compile c c "") ++ [EndProg]
       where functions = (concat $ compileFunctions c)
+            bs = getTableAllocation c
