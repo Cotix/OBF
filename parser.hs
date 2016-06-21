@@ -86,11 +86,12 @@ compile (x:xs) c s = case x of
                       Const 3 RegD, Compute Add RegD RegC RegD, Store RegD (Deref RegC), --Store first tapenode as first in tmnode
                       Const root RegE, Store RegE (Deref RegD),                          --New node is root type
                       Const t RegE, Store RegE (Deref RegA),                             --Store the new type in current node
+                      Const 3 RegE, Compute Add RegE RegC RegE,                          --New node pointer -> regE
                       Const 1 RegE, Compute Add RegE RegA RegE, Store RegD (Deref RegE), --Store the new node as value
                       Const 8 RegD, Compute Add RegC RegD RegC,                          --Updating RegC
                       --End of setting up new chain
                       Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegA] ++ compile xs c s
-                  '&' -> [Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref RegA) RegA,
+                  '&' -> [Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegA,
                       Const 2 RegD, Compute Add RegD RegA RegA, Load (Deref RegA) RegA] ++ compile xs c s
                   '|' -> [Load (Deref RegA) RegD, Const root RegE, Compute Sub RegE RegD RegE,
                       Branch RegE (Rel 8), Const b RegD, Store RegD (Deref RegA),
@@ -184,7 +185,7 @@ makeBlock c f = setBlock (getTableAddress f c) (map ((getFunctionOffsetByIndex c
 compileBlocks c = concat (map (makeBlock c) (map fst (("",""):(getFunctions c))))
 
 debug :: SystemState -> String
-debug SysState{..}  = show ((regbank (sprs!!0))!PC) ++ "\n"
+debug SysState{..}  = show ((regbank (sprs!!0))!PC) ++ " " ++ (show ((regbank (sprs!!0))!RegA)) ++  "\n"
 
 link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
           [Const (fromIntegral (256+(bs)+8)) RegC,
