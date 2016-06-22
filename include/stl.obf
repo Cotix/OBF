@@ -7,9 +7,10 @@
 :bt:?>b+++++++++++++++++++++++++++++++++++++++++++++++++.:
 %Strings%
 :S:^*b&:
-:S+:*[>]?>b<$c>[-$+$]!$&:
-:Sa:$*[$+$>]$:
-:Sp:*[.>]&:
+:S+:*[>]?>b<$c>[-$+$]!$&: %Adds a character(as a byte) to the string%
+:Sa:$*[$+$>]$: %Concatenates another string to the source%
+:Sp:*[.>]&: %prints the string%
+
 
 
 
