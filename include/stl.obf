@@ -1,0 +1,17 @@
+%byte functions%
+:bc:?>b?>b<<[->+>+<<]>[-<+>]!: %Copies the current byte to a new square right of it%
+:b=:c>$c>[-$-$]!$: %Equals check with pointer. Inserts a new square right with the result and moves the pointer to the right%
+:ba:$c>[-$+$]!$: %Adds two bytes. saves in source%
+:bs:$c>[-$-$]!$: %Substracts two bytes. saves in source%
+:bm:$c>c[->$a$<]!>!$: %multiplies two bytes. saves in source%
+:bt:?>b+++++++++++++++++++++++++++++++++++++++++++++++++.:
+%Strings%
+:S:^*b&:
+:S+:*[>]?>b<$c>[-$+$]!$&:
+:Sa:$*[$+$>]$:
+:Sp:*[.>]&:
+
+
+
+
+S*^|h?>|o?>|i?>b&?>S*^|!-?>|w?>|e?>|r?>|e?>|l?>|d?>b&@<ap

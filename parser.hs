@@ -83,7 +83,7 @@ compile (x:xs) c s = case x of
                   '>' -> [Const 2 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegA,
                       Branch RegA (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
                       EndProg] ++ compile xs c s
-                  '^' -> [Const root RegD, Store RegD (Deref RegA), Const 1 RegD,
+                  '^' -> [Store Zero (Deref RegA), Const 1 RegD,
                       Compute Add RegD RegA RegD,
                       Store Zero (Deref RegD)] ++ compile xs c s
                   '*' -> [Load (Deref RegA) RegD, Branch RegD (Rel 20), Const t RegD,
@@ -99,7 +99,8 @@ compile (x:xs) c s = case x of
                       Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegA] ++ compile xs c s
                   '&' -> [Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegA,
                       Const 2 RegD, Compute Add RegD RegA RegA, Load (Deref RegA) RegA] ++ compile xs c s
-                  '|' -> [Load (Deref RegA) RegD, Const root RegE, Compute Sub RegE RegD RegE,
+                  '|' -> [Load (Deref RegA) RegD, Branch RegD (Rel 2), Jump (Rel 4),
+                      Const root RegE, Compute Sub RegE RegD RegE,
                       Branch RegE (Rel 8), Const b RegD, Store RegD (Deref RegA),
                       Const 1 RegD, Compute Add RegD RegA RegD, Const x2 RegE,
                       Store RegE (Deref RegD), Jump (Rel 4),
@@ -114,6 +115,8 @@ compile (x:xs) c s = case x of
                       Const 3 RegE, Compute Add RegE RegD RegD, Store RegC (Deref RegD), --Set previous node c
                       Const 2 RegD, Compute Add RegA RegD RegD, Store RegC (Deref RegD), --Next old node
                       Const root RegD, Store RegD (Deref RegC),                          --Set new node to type root
+                      Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegD,
+                      Const 4 RegE, Compute Add RegE RegC RegE, Store RegD (Deref RegE), --Set new node begin
                       Const 5 RegD, Compute Add RegD RegC RegC] ++ compile xs c s
                   '!' -> [Const 3 RegD, Compute Add RegA RegD RegD,
                       Load (Deref RegD) RegD, Branch RegD (Rel 4),
@@ -196,8 +199,11 @@ removeWhiteSpace (x:xs) | elem (ord x) [32, 9, 10] = removeWhiteSpace xs
 
 
 debug :: SystemState -> String
-debug SysState{..}  = show ((regbank (sprs!!0))!PC) ++ " " ++ (show ((regbank (sprs!!0))!RegA)) ++  "\n"
-
+debug SysState{..}
+  | (regbank (sprs!!0))!PC == (regbank (sprs!!0))!RegD
+    = "Function call" ++ (show ((regbank (sprs!!0))!PC)) ++ " " ++ "\n"
+  | otherwise = show ((regbank (sprs!!0))!PC) ++ " " ++
+    (show ((regbank (sprs!!0))!RegA)) ++ "\n"
 link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
           [Const (fromIntegral (256+(bs)+8)) RegC,
            Const (fromIntegral (256+(bs))) RegA,
@@ -212,5 +218,6 @@ main = do
   handle <- openFile "include/stl.obf" ReadMode
   contents <- hGetContents handle
   putStr (removeWhiteSpace contents)
-  run 1 (link (removeWhiteSpace contents))
+  mapM putStrLn (map (show) (getFunctionOffsets (removeWhiteSpace contents)))
+  run  1 (link (removeWhiteSpace contents))
   hClose handle

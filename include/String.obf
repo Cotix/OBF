@@ -1,0 +1,6 @@
+%byte functions%
+:bc:?>b?>b<<[->+>+<<]>[-<+>]!: %Copies the current byte to a new square right of it%
+:b=:c>$c>[-$-$]!$: %Equals check with pointer. Inserts a new square right with the result and moves the pointer to the right%
+%Character class%
+:C:^*b&:
+:C=:*?>?
