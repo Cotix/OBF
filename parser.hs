@@ -2,6 +2,11 @@
 import Sprockell.System
 import Sprockell.TypesEtc
 import Data.Int
+import Data.Ord
+import System.IO
+import System.Environment
+import Control.Monad
+import Data.Conduit
 type Code = String
 type Function = (String, String)
 type Op = Char
@@ -78,7 +83,8 @@ compile (x:xs) c s = case x of
                   '>' -> [Const 2 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegA,
                       Branch RegA (Rel 4), Const 1 RegD, Write RegD (Addr 0x1000000),
                       EndProg] ++ compile xs c s
-                  '^' -> [Store Zero (Deref RegA), Const 1 RegD, Compute Add RegD RegA RegD,
+                  '^' -> [Const root RegD, Store RegD (Deref RegA), Const 1 RegD,
+                      Compute Add RegD RegA RegD,
                       Store Zero (Deref RegD)] ++ compile xs c s
                   '*' -> [Load (Deref RegA) RegD, Branch RegD (Rel 20), Const t RegD,
                       Const 2 RegD, Compute Add RegD RegC RegD, Store RegA (Deref RegD), --Store current node as parent
@@ -184,6 +190,11 @@ makeBlock c f = setBlock (getTableAddress f c) (map ((getFunctionOffsetByIndex c
 
 compileBlocks c = concat (map (makeBlock c) (map fst (("",""):(getFunctions c))))
 
+removeWhiteSpace [] = []
+removeWhiteSpace (x:xs) | elem (ord x) [32, 9, 10] = removeWhiteSpace xs
+                        | otherwise = x : (removeWhiteSpace xs)
+
+
 debug :: SystemState -> String
 debug SysState{..}  = show ((regbank (sprs!!0))!PC) ++ " " ++ (show ((regbank (sprs!!0))!RegA)) ++  "\n"
 
@@ -195,3 +206,11 @@ link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
           (compile c c "") ++ [EndProg]
       where functions = (concat $ compileFunctions c)
             bs = getTableAllocation c
+
+
+main = do
+  handle <- openFile "include/stl.obf" ReadMode
+  contents <- hGetContents handle
+  putStr (removeWhiteSpace contents)
+  run 1 (link (removeWhiteSpace contents))
+  hClose handle
