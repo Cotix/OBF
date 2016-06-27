@@ -4,12 +4,12 @@
 :ba:$c>[-$+$]!$: %Adds two bytes. saves in source%
 :bs:$c>[-$-$]!$: %Substracts two bytes. saves in source%
 :bm:$c>c[->$a$<]!>!$: %multiplies two bytes. saves in source%
-:bt:?>b+++++++++++++++++++++++++++++++++++++++++++++++++.:
 %Strings%
 :S:^*b&:
 :S+:*[>]?>b<$c>[-$+$]!$&: %Adds a character(as a byte) to the string%
 :Sa:$*[$+$>]$: %Concatenates another string to the source%
 :Sp:*[.>]&: %prints the string%
+
 
 
 
