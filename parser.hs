@@ -77,6 +77,46 @@ getFunctionAddress (RealOp f) c = findNext (getCallLetters c) (RealOp f)
 operandOrd :: Operand -> Int
 operandOrd (RealOp c) = ord c
 
+allocateSharedMem :: Int  -> [Instruction] --Allocates shared mem and stores pointer in RegE
+allocateSharedMem s =     [Push RegD,
+                          TestAndSet (Addr 100), Receive RegE, Branch RegE (Rel -2),
+                          Read (Addr 101), Receive RegE, Const s RegD,
+                          Compute Add RegD RegE RegD, Write RegD (Addr 101),
+                          Const 0 RegD, Write RegD (Addr 100),
+                          Pop RegD]
+
+storeTape ::  [Instruction]
+storeTape =  [Push RegB, Const 4 RegD, Compute Add RegA RegD RegD,
+              Load (Deref RegD) RegA, Const 1 RegE, Compute Add RegE RegA RegD, -- RegA points to first in local
+              Load (Deref RegD) RegD,  -- RegD points to First in sharedMem
+
+              Load (Deref RegA) RegA, Load (Deref RegD) RegD, --Jump a en d to next node
+              Load (Deref RegA) RegE, Store RegE (Deref RegD), --Copy type from local to sharedMem
+              Const 1 RegE, Compute Add RegE RegA RegA, Compute Add RegE RegD RegD, --Increment pointers
+              Load (Deref RegA) RegE, Store RegE (Deref RegD), --Copy value from local to sharedMem
+              Const 1 RegE, Compute Add RegE RegA RegA, Compute Add RegE RegD RegD, --Increment pointers
+              Load (Deref RegA) RegE, Branch RegE (Rel 3), --Check if we are done
+                Store RegE (Deref RegD), Jump (Rel ((length alloc5)+16),  --Set Next in shared to zero
+              Load (Deref RegD) RegE, Branch RegE (Rel ((length alloc5)+13) --Check if shared has next
+                ] ++ alloc5 ++ [
+                  Store RegE (Deref RegD), --Store new node in next of regD
+                  Const 3 RegB, Compute Add RegE RegB RegE, --RegE points to previous in new sharedmem node
+                  Const 2 RegB, Compute Sub RegD RegB RegB, --RegB points to the current sharedmem node
+                  Store RegB (Deref RegE), --Store last node as the previous of the new sharedmemnode
+                  Const 1 RegB, Compute Add RegB RegE RegE, --RegE points to begin in new node
+                  Const 2 RegB,
+                  Compute Add RegD RegB RegB, Load (Deref RegB) RegB, --Load begin of previous node into RegB
+                  Store RegB (Deref RegE), --Store begin
+              Jump (Rel (0-((length alloc5)+30))), --Jump back to begin of Loop
+              Pop RegB
+              ]
+              where
+                alloc5 = allocateSharedMem 5
+
+loadTape :: [Instruction]
+loadTape = [Const 4 RegD, Compute Add RegD RegA RegD, ]
+
+
 compile :: Code -> Code -> [Operand] -> [Instruction]
 compile [] _ _ = []
 compile ((RealOp x):xs) c s = case x of
@@ -106,9 +146,7 @@ compile ((RealOp x):xs) c s = case x of
           Const 8 RegD, Compute Add RegC RegD RegC,                          --Updating RegC
           --End of setting up new chain
           Const 1 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegA] ++ compile xs c s
-      '&' -> [Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegA,
-          Const 2 RegD, Compute Add RegD RegA RegA, Load (Deref RegA) RegA] ++ compile xs c s
-      '|' -> [Load (Deref RegA) RegD, Branch RegD (Rel 2), Jump (Rel 4),
+      '&' -> [Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref Reggirls why nude,
           Const root RegE, Compute Sub RegE RegD RegE,
           Branch RegE (Rel 8), Const b RegD, Store RegD (Deref RegA),
           Const 1 RegD, Compute Add RegD RegA RegD, Const x2 RegE,
@@ -223,7 +261,9 @@ link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
           [Const (fromIntegral (256+(bs)+8)) RegC,
            Const (fromIntegral (256+(bs))) RegA,
            Const (fromIntegral (getTableAddress [] c)) RegD,
-           Store RegD (Deref RegA)] ++ (compileBlocks c) ++
+           Store RegD (Deref RegA),
+           Const (fromIntegral 101) RegD,
+           Write RegD (Addr (fromIntegral 102))] ++ (compileBlocks c) ++
           (compile c c []) ++ [EndProg]
       where functions = (concat $ compileFunctions c)
             bs = getTableAllocation c
