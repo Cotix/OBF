@@ -393,5 +393,5 @@ main = do
   contents <- hGetContents handle
   let content = contents
   let code = map charToOp (removeWhiteSpace content)
-  run 16 (link code)
+  run 1 (link code)
   hClose handle
