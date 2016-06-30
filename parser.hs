@@ -36,6 +36,14 @@ findIfLoop ((RealOp x):xs) c | x == '(' = (RealOp x) : (findIfLoop xs (c+1))
                     | otherwise = (RealOp x) : (findIfLoop xs c)
 findIfLoop ((PseudoOp x i):xs) c =  (PseudoOp x i) : (findIfLoop xs c)
 
+findThreadBlock :: Code -> Int -> Code
+findThreadBlock [] _ = error "Could not match thread slashes"
+findThreadBlock ((RealOp x):xs) c | x == '/' = (RealOp x) : (findThreadBlock xs (c+1))
+                    | x == '\\' && c == 0 = []
+                    | x == '\\' = (RealOp x) : findThreadBlock xs (c-1)
+                    | otherwise = (RealOp x) : (findThreadBlock xs c)
+findThreadBlock ((PseudoOp x i):xs) c =  (PseudoOp x i) : (findThreadBlock xs c)
+
 filterComments :: Code -> Code
 filterComments [] = []
 filterComments (x:xs) | x == (RealOp '%') = filterComments $ drop ((findNext xs (RealOp '%'))+1) xs
@@ -176,7 +184,8 @@ compile ((RealOp x):xs) c s = case x of
               Const 1 RegD, Store RegD (Addr (w+5))]++ --Write dirty flag
               compile (tail xs) c s
       '@' -> [Compute Add RegB Zero RegA] ++ compile xs c s
-      '$' -> storeNode c ++ unlock ++ [Compute Add RegB Zero RegA, Compute Add RegA Zero RegB] ++
+      '$' -> storeNode c ++ unlock ++ [Compute Add RegB Zero RegC, Compute Add RegA Zero RegB,
+             Compute Add RegC Zero RegA] ++
              lock ++ loadNode c  ++ compile xs c s
 
       '?' -> [Push RegB, Load (Addr (w+2)) RegB,
@@ -226,6 +235,25 @@ compile ((RealOp x):xs) c s = case x of
       ']' -> error "Brackets are mismatched: Illegal ']' found \n"
       '(' -> [Load (Addr (w+1)) RegD,
           Branch RegD (Rel ifLoopLen)] ++ ifLoop ++ compile ifLoopXs c s
+      '/' -> [Const 4 RegD, Const (-4) RegC,
+              Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegE,
+              Branch RegE (Rel (-3)), Const 96 RegE, Compute Sub RegD RegE RegE,
+              Branch RegE (Rel 2), Jump (Rel (-9)), --If D == 100 start over
+              Const 3 RegE, Compute Add RegE RegC RegE,
+              TestAndSet (Deref RegE), Receive RegE, --Take lock
+              Branch RegE (Rel 2), Jump (Rel (-13)), --If lock fails, search on
+              Read (Deref RegC), Receive RegE, Branch RegE (Rel 2), Jump (Rel 5),
+                --If this job is not 0 anymore, release lock and go on
+                Const 3 RegE, Compute Add RegE RegC RegE,
+                Write Zero (Deref RegE), Jump (Rel (-21)), --Release lock
+              --Job is locked and still empty. Let's fill it!
+              Const 1 RegD, Const 9 RegE, Compute Add PC RegE RegE,
+              Write RegE (Deref RegC), --Write PC + 9
+              Compute Add RegD RegC RegC, Write RegA (Deref RegC), --Write reg A
+              Compute Add RegD RegC RegC, Write RegB (Deref RegC), --Write reg B
+              Compute Add RegD RegC RegC, Write Zero (Deref RegC), --Release lock
+              Jump (Rel (threadBlockLen + 1)) --Jump over the threadcode
+              ] ++ threadBlock ++ [Jump (Abs 0)] ++ compile threadBlockXs c s
       ':' -> compile def c s
       '%' -> compile comment c s
       _ -> [Load (Addr w) RegD, Const fAddress RegE,
@@ -239,6 +267,9 @@ compile ((RealOp x):xs) c s = case x of
             whileLoop = compile (findWhileLoop xs 0) c s
             whileLoopXs = drop (length (findWhileLoop xs 0) + 1) xs
             whileLoopLen = fromIntegral (length whileLoop + 1)
+            threadBlock = compile (findThreadBlock xs 0) c s
+            threadBlockXs = drop (length (findThreadBlock xs 0) + 1) xs
+            threadBlockLen = fromIntegral (length threadBlock + 1)
             ifLoop = compile (findIfLoop xs 0) c s
             ifLoopXs = drop (length (findIfLoop xs 0) + 1) xs
             ifLoopLen = fromIntegral (length ifLoop +1)
@@ -251,6 +282,34 @@ compile ((RealOp x):xs) c s = case x of
 
 compile ((PseudoOp x i):xs) c s = []
 
+
+threadPool :: Code -> [Instruction]
+threadPool c = [Branch SPID (Rel 2), Jump (Rel lenJump), --All threads except main thread
+        Const 4 RegD, Const (-4) RegC,
+        Compute Add RegD RegC RegC, Const 96 RegE, Compute Sub RegC RegE RegE,
+        Branch RegE (Rel 2), Jump (Rel (-6)), --End of list, jump to beginning
+        Read (Deref RegC), Receive RegE, --Read Job PC
+        Branch RegE (Rel (2)), Jump (Rel (-8)), --If empty, goto next iteration
+        --Now lets try to claim this job!
+        Const 3 RegE, Compute Add RegE RegC RegE,
+        TestAndSet (Deref RegE), Receive RegE, --Take lock
+        Branch RegE (Rel 2), Jump (Rel (-14)), --If lock fails, search on
+        --If this job is already cleared, release lock and go on
+        Read (Deref RegC), Receive RegE, Branch RegE (Rel 5),
+          Const 3 RegE, Compute Add RegE RegC RegE, --Lock
+          Write Zero (Deref RegE), Jump (Rel (-21)), --Release and leave!
+        --Lets take the job
+        Const 1 RegD, Write Zero (Deref RegC), --Clear PC
+        Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegA, --Read regA
+        Write Zero (Deref RegC), --Clear RegA field
+        Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegB, --Read regB
+        Compute Add RegD RegC RegC, Write Zero (Deref RegC), --Clear lock
+        Compute Add Zero RegE RegC --Move Instruction pointer to RegC so it will surive the lock calls
+        ] ++ lock ++ loadNode c ++ [Jump (Ind RegC)]
+        where
+          lenStore = fromIntegral (length (loadNode c))
+          lenUnlock = fromIntegral (length (unlock))
+          lenJump = 41 + lenStore + lenUnlock
 
 compileFunction :: Code -> Function -> [Instruction]
 compileFunction c ([RealOp 'b'],xs) = [Const b RegD, Store RegD (Addr w),
@@ -306,18 +365,21 @@ removeWhiteSpace (x:xs) | elem (ord x) [32, 9, 10] = removeWhiteSpace xs
 
 debug :: SystemState -> String
 debug SysState{..}
+  | (regbank (sprs!!0))!SPID == 0 = ""
   | (regbank (sprs!!0))!PC == (regbank (sprs!!0))!RegD
     = "Function call" ++ (show ((regbank (sprs!!0))!PC)) ++ " " ++ "\n"
   | otherwise = show ((regbank (sprs!!0))!PC) ++ " " ++
-    (show ((regbank (sprs!!0))!RegA)) ++ "\n"
+    (show ((regbank (sprs!!0))!SPID)) ++ "\n"
 
 
 link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
+          compileBlocks c ++
+          threadPool c ++
           [Const (fromIntegral (getTableAddress [] c)) RegD,
            Store RegD (Addr w),
            Const (fromIntegral 108) RegD,
            Const 102 RegB,
-           Write RegD (Addr (fromIntegral 101))] ++ (compileBlocks c) ++
+           Write RegD (Addr (fromIntegral 101))]  ++
           (compile c c []) ++ [EndProg]
       where functions = (concat $ compileFunctions c)
             bs = getTableAllocation c
@@ -331,6 +393,5 @@ main = do
   contents <- hGetContents handle
   let content = contents
   let code = map charToOp (removeWhiteSpace content)
-  -- mapM putStrLn (map (show) (getFunctionOffsets (removeWhiteSpace contents)))
-  run  1 (link code)
+  run 16 (link code)
   hClose handle
