@@ -78,46 +78,46 @@ operandOrd :: Operand -> Int
 operandOrd (RealOp c) = ord c
 
 ptrWork :: Code -> Value
-ptrWork c = 256 + (getTableAllocation c)
+ptrWork c = fromIntegral(256 + (getTableAllocation c))
 
 allocateSharedMem :: Int  -> [Instruction] --Allocates shared mem and stores pointer in RegE
 allocateSharedMem s =     [TestAndSet (Addr 100),
-                          Receive RegE, Branch RegE (Rel 2), Jmp (Rel (0-3)),
-                          Read (Addr 101), Receive RegE, Const s RegD,
+                          Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3)),
+                          Read (Addr 101), Receive RegE, Const (fromIntegral s) RegD,
                           Compute Add RegD RegE RegD, Write RegD (Addr 101),
                           Const 0 RegD, Write RegD (Addr 100)]
 
 lock :: [Instruction]
 lock = [Const 5 RegD, Compute Add RegD RegB RegD,
-        TestAndSet (Deref RegD), Receive RegE, Branch (Rel 2), Jmp (Rel (0-3))]
+        TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3))]
 
 unlock :: [Instruction]
-unlock = [Const 5 RegD, Compute Add RegD RegB RegD, Store Zero (Deref RegD)]
+unlock = [Const 5 RegD, Compute Add RegD RegB RegD, Write Zero (Deref RegD)]
 
-loadNode :: code -> [Instruction]
+loadNode :: Code -> [Instruction]
 loadNode c = [Read (Deref RegB), Receive RegD, Store RegD (Addr (ptrWork c)), --Load type
               Const 1 RegD, Compute Add RegD RegB RegD,
-              Read (Deref RegB), Receive RegD, Store RegD (Addr ((ptrWork c) + 1)), --Load value
+              Read (Deref RegD), Receive RegD, Store RegD (Addr ((ptrWork c) + 1)), --Load value
               Const 2 RegD, Compute Add RegD RegB RegD,
-              Read (Deref RegB), Receive RegD, Store RegD (Addr ((ptrWork c) + 2)), --Load next
+              Read (Deref RegD), Receive RegD, Store RegD (Addr ((ptrWork c) + 2)), --Load next
               Const 3 RegD, Compute Add RegD RegB RegD,
-              Read (Deref RegB), Receive RegD, Store RegD (Addr ((ptrWork c) + 3)), --Load previous
+              Read (Deref RegD), Receive RegD, Store RegD (Addr ((ptrWork c) + 3)), --Load previous
               Const 4 RegD, Compute Add RegD RegB RegD,
-              Read (Deref RegB), Receive RegD, Store RegD (Addr ((ptrWork c) + 4)), --Load begin
+              Read (Deref RegD), Receive RegD, Store RegD (Addr ((ptrWork c) + 4)), --Load begin
               Const 0 RegD,
               Store RegD (Addr ((ptrWork c) + 5))] -- Store 0 to dirty flag
 
-storeNode :: code -> [Instruction]
-storeNode c =[Load (Addr ((ptrWork c))+5) RegD, Branch RegD (Rel 2),
-              Jmp (Rel 19), -- Jump over store node
+storeNode :: Code -> [Instruction]
+storeNode c =[Load (Addr ((ptrWork c)+5)) RegD, Branch RegD (Rel 2),
+              Jump (Rel 19), -- Jump over store node
               Load (Addr (ptrWork c)) RegD, Write RegD (Deref RegB), --Store Type
-              Const 1 RegD, Compute RegD RegB RegE,
+              Const 1 RegD, Compute Add RegD RegB RegE,
               Load (Addr ((ptrWork c)+1)) RegD, Write RegD (Deref RegE), --Store value
-              Const 2 RegD, Compute RegD RegB RegE,
+              Const 2 RegD, Compute Add RegD RegB RegE,
               Load (Addr ((ptrWork c)+2)) RegD, Write RegD (Deref RegE), --Store next
-              Const 3 RegD, Compute RegD RegB RegE,
+              Const 3 RegD, Compute Add RegD RegB RegE,
               Load (Addr ((ptrWork c)+3)) RegD, Write RegD (Deref RegE), --Store previous
-              Const 4 RegD, Compute RegD RegB RegE,
+              Const 4 RegD, Compute Add RegD RegB RegE,
               Load (Addr ((ptrWork c)+4)) RegD, Write RegD (Deref RegE) --Store begin
               ]
 
@@ -128,67 +128,97 @@ compile ((RealOp x):xs) c s = case x of
           Store RegE (Addr w), Store RegD (Addr (w+1)),  --Write value
           Const 1 RegD, Store RegD (Addr (w+5))] ++ compile xs c s --Write dirty flag
       '.' -> [Load (Addr (w+1)) RegD, Write RegD (Addr 0x1000000)] ++ compile xs c s
-      '<' -> storeNode ++ unlock ++ [Load (Addr (w+3)) RegB] ++ lock ++
+      '<' -> storeNode c ++ unlock ++ [Load (Addr (w+3)) RegB] ++ lock ++
                [Branch RegB (Rel 4),
                 Const 1 RegD, Write RegD (Addr 0x1000000), EndProg]
-             ++ loadNode ++ compile xs c s
-      '>' -> storeNode ++ unlock ++ [Load (Addr (w+2)) RegB] ++ lock ++
+             ++ loadNode c ++ compile xs c s
+      '>' -> storeNode c ++ unlock ++ [Load (Addr (w+2)) RegB] ++ lock ++
                [Branch RegB (Rel 4),
                 Const 1 RegD, Write RegD (Addr 0x1000000), EndProg]
-             ++ loadNode ++ compile xs c s
-      '^' -> [Store Zero (Addr (w)), Store Zero (Addr (w+1)), --Clear node
+             ++ loadNode c ++ compile xs c s
+      '^' -> [Const root RegD,
+              Store RegD (Addr (w)), Store Zero (Addr (w+1)), --Clear node
               Const 1 RegD, Store RegD (Addr (w+5))] --Write dirty flag
               ++ compile xs c s
-      --TODO *
-      '*' -> [Load (Deref RegA) RegD, Branch RegD (Rel (10 + allocSize))]
-          ++ (allocateSharedMem 10) ++[
-          Write RegB (Deref RegE),                 --Store current node as parent
+      '*' -> [Load (Addr w) RegD, Const root RegE, Compute Sub RegD RegE RegD,
+          Branch RegD (Rel (fromIntegral (14 + allocSize)))]
+          ++ (allocateSharedMem 9) ++
+         [Write RegB (Deref RegE),                 --Store current node as parent
           --TMNode setup done, threadcount and lock can stay 0.
           --Now setting up the first node
           Const 7 RegD, Compute Add RegD RegE RegD,
           Write RegE (Deref RegD), --Save TMNode into begin of first node
+          Const 3 RegD, Compute Add RegD RegE RegD,
+          Const root RegC, Write RegC (Deref RegD), --Set root type
           --First node setup done, now old node updating
           Const 1 RegD, Store RegD (Addr (w+5)), --Set dirty flag
           Const t RegD, Store RegD (Addr w), --Set new type
-          Store RegE (Addr (w+1))] ++ --Store new TMNode as value
+          Store RegE (Addr (w+1)), --Store new TMNode as value
           --End of setting up new chain
-          storeNode ++ unlock ++ [Load (Addr (w+1)) RegB] ++ lock ++ loadNode ++ compile xs c s
-      --TODO &
-      '&' -> [Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref Reg,
-          Const root RegE, Compute Sub RegE RegD RegE,
-          Branch RegE (Rel 8), Const b RegD, Store RegD (Deref RegA),
-          Const 1 RegD, Compute Add RegD RegA RegD, Const x2 RegE,
-          Store RegE (Deref RegD), Jump (Rel 4),
-          Const 2 RegD, Write RegD (Addr 0x1000000), EndProg] ++ compile (tail xs) c s
-
-      --End TODO
-
+          Load (Addr (w+1)) RegD, Const 2 RegE, Compute Add RegD RegE RegD, --threadlock
+          TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3)), --Lock threadcount
+          Const 1 RegE, Compute Sub RegD RegE RegD, Read (Deref RegD), Receive RegC,
+          Compute Add RegE RegC RegC, Write RegC (Deref RegD), --Increment threadcount
+          Compute Add RegE RegD RegD, Write Zero (Deref RegD)] ++ --Free lock
+          storeNode c ++ unlock ++
+          [Load (Addr (w+1)) RegB, Const 3 RegD, Compute Add RegB RegD RegB] ++
+          lock ++ loadNode c ++ compile xs c s
+      '&' -> storeNode c ++ unlock ++ [Load (Addr (w+4)) RegD, Const 2 RegE, Compute Add RegE RegD RegD,
+            TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3)), --Lock threadcount
+            Const 1 RegE, Compute Sub RegD RegE RegC, Read (Deref RegC), Receive RegD,
+            Compute Sub RegD RegE RegD, Write RegD (Deref RegC), --Update threadcount
+            Compute Add RegC RegE RegC, Write Zero (Deref RegC), --clear thread lock
+            Const 2 RegE,
+            Compute Sub RegC RegE RegC, Read (Deref RegC), Receive RegB] ++
+            lock ++ loadNode c ++ compile xs c s
+      '|' -> [Const b RegD, Store RegD (Addr w), --Store byte type
+              Const x2 RegD, Store RegD (Addr (w+1)),  --Store value
+              Const 1 RegD, Store RegD (Addr (w+5))]++ --Write dirty flag
+              compile (tail xs) c s
       '@' -> [Compute Add RegB Zero RegA] ++ compile xs c s
-      '$' -> storeNode ++ [Compute Add RegB Zero RegA, Compute Add RegA Zero RegB]
-             ++ loadNode ++ compile xs c s
+      '$' -> storeNode c ++ unlock ++ [Compute Add RegB Zero RegA, Compute Add RegA Zero RegB] ++
+             lock ++ loadNode c  ++ compile xs c s
 
-      --TODO
-      '?' -> [Const 3 RegD, Compute Add RegD RegC RegD, Store RegA (Deref RegD), --Previous new node
-          Const 2 RegD, Compute Add RegA RegD RegD, Const 2 RegE,
-          Compute Add RegC RegE RegE, Load (Deref RegD) RegD,
-          Store RegD (Deref RegE),                                           --Set Next new node
-          Const 3 RegE, Compute Add RegE RegD RegD, Store RegC (Deref RegD), --Set previous node c
-          Const 2 RegD, Compute Add RegA RegD RegD, Store RegC (Deref RegD), --Next old node
-          Const root RegD, Store RegD (Deref RegC),                          --Set new node to type root
-          Const 4 RegD, Compute Add RegD RegA RegD, Load (Deref RegD) RegD,
-          Const 4 RegE, Compute Add RegE RegC RegE, Store RegD (Deref RegE), --Set new node begin
-          Const 5 RegD, Compute Add RegD RegC RegC] ++ compile xs c s
-      '!' -> [Const 3 RegD, Compute Add RegA RegD RegD,
-          Load (Deref RegD) RegD, Branch RegD (Rel 4),
-          Const 3 RegD, Write RegD (Addr 0x1000000), EndProg,
-          Const 2 RegD, Compute Add RegA RegD RegD, Load (Deref RegD) RegD,
-          Const 3 RegE, Compute Add RegD RegE RegD, Compute Add RegE RegA RegE,
-          Load (Deref RegE) RegE, Store RegE (Deref RegD),                   --Set previous of old Next
-          Compute Add RegE Zero RegA,                                        --Updating regA
-          Const 3 RegE, Compute Sub RegD RegE RegD,
-          Const 2 RegE, Compute Add RegA RegE RegE, Store RegD (Deref RegE)  --Set next of old previous
-          ] ++ compile xs c s
-      --END TODO
+      '?' -> [Push RegB, Load (Addr (w+2)) RegB,
+              Branch RegB (Rel 2), Jump (Rel (fromIntegral ((length lock) + 1)))]
+              ++ lock ++ --Acuire lock on next node
+             allocateSharedMem 6 ++ [Const root RegD, Write RegD (Deref RegE), --Write root type
+             Const 2 RegC, Compute Add RegC RegE RegD, Write RegB (Deref RegD), --Write next
+             Pop RegC, Push RegC, Const 3 RegD, Compute Add RegD RegE RegD,
+             Write RegC (Deref RegD), --Write previous
+             Load (Addr (w+4)) RegC, Const 4 RegD, Compute Add RegD RegE RegD,
+             Write RegC (Deref RegD), --Write begin
+             Branch RegB (Rel 2), Jump (Rel 4),
+             Const 3 RegD, Compute Add RegB RegD RegD, Write RegE (Deref RegD), --Write previous of next node
+             Store RegE (Addr (w+2)), Const 1 RegD, Store RegD (Addr (w+5)),
+             Branch RegB (Rel 2), Jump (Rel (fromIntegral ((length unlock) + 1)))] --Write next of current node + dirty flag
+             ++ unlock ++ [Pop RegB] ++ compile xs c s
+
+      '!' -> [Push RegB, Load (Addr (w+3)) RegB, Branch RegB (Rel 4),
+              Const 2 RegD, Write RegD (Addr 0x1000000), EndProg,
+              Const 5 RegD, Compute Add RegD RegB RegD,
+              TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (3+ lenRelease)),
+                Pop RegB] ++ releaseLock ++ [Jump (Rel (0-lenRelease-12)),
+              Pop RegB, Push RegB, Load (Addr (w+2)) RegB, Branch RegB (Rel 2),
+                Jump (Rel (18 + lenUnlock*2 + lenStore)), --Jump to after previous set
+              Const 5 RegD, Compute Add RegD RegB RegD,
+              TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (6+ lenUnlock)),
+                Pop RegB, Push RegB, Load (Addr (w+3)) RegB] ++ unlock ++ [Pop RegB,
+                Jump (Rel (0-15-lenUnlock-lenRelease)),
+              Const 3 RegC, Compute Add RegC RegB RegD, Read (Deref RegD), Receive RegE, ---RegE points to current
+              Compute Add RegC RegE RegE, Read (Deref RegE), Receive RegE, --RegE points to previous
+              Write RegE (Deref RegD), --Write previous of next node
+              Compute Add Zero RegB RegC] ++ storeNode c ++ unlock ++ [
+              Pop RegB, Compute Add RegB Zero RegC, Load (Addr (w+3)) RegB,
+              Const 2 RegD, Compute Add RegB RegD RegE, --RegE points to prevNode next
+              Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegC, --RegC contains old next
+              Write RegC (Deref RegE)] --Write to prev node next
+              ++ compile xs c s
+              where
+                releaseLock = storeNode c ++ unlock ++ lock ++ loadNode c
+                lenRelease = fromIntegral (length releaseLock)
+                lenStore = fromIntegral (length (storeNode c))
+                lenUnlock = fromIntegral (length (unlock))
 
       '[' -> [Load (Addr (w+1)) RegD,
           Branch RegD (Rel 2), Jump (Rel (whileLoopLen + 1))] ++ whileLoop ++
@@ -217,26 +247,31 @@ compile ((RealOp x):xs) c s = case x of
             comment = drop (findNext xs (RealOp '%') + 1) xs
             fAddress = fromIntegral (getFunctionAddress (RealOp x) c)
             w = ptrWork c
-            alloc5 = allocateSharedMem 5
-            allocSize = length (alloc5)
+            allocSize = length (allocateSharedMem 6)
 
 compile ((PseudoOp x i):xs) c s = []
 
 
 compileFunction :: Code -> Function -> [Instruction]
-compileFunction c ([RealOp 'b'],xs) = [Const b RegD, Store RegD (Deref RegA),
+compileFunction c ([RealOp 'b'],xs) = [Const b RegD, Store RegD (Addr w),
+                          Const 1 RegD, Store RegD (Addr (w+5)), --write dirty
                           Pop RegD, Jump (Ind RegD)]
                 where b = fromIntegral (getTableAddress [RealOp 'b'] c)
+                      w = ptrWork c
 compileFunction c ([RealOp 'b', RealOp '+'],xs)
-                              = [Const 1 RegD, Compute Add RegA RegD RegE, Load (Deref RegE) RegE,
-                              Compute Add RegD RegE RegE,
-                              Compute Add RegA RegD RegD, Store RegE (Deref RegD),
+                              = [Load (Addr (w+1)) RegE, Const 1 RegD,
+                              Compute Add RegD RegE RegE,Store RegE (Addr (w+1)),
+                              Const 1 RegD, Store RegD (Addr (w+5)), --write dirty
                               Pop RegD, Jump (Ind RegD)]
-compileFunction c ([RealOp 'b', RealOp '-'], xs)
-                              = [Const 1 RegD, Compute Add RegA RegD RegE, Load (Deref RegE) RegE,
-                              Compute Sub RegE RegD RegE,
-                              Compute Add RegA RegD RegD, Store RegE (Deref RegD),
+                              where
+                                    w = ptrWork c
+compileFunction c ([RealOp 'b', RealOp '-'],xs)
+                              = [Load (Addr (w+1)) RegE, Const 1 RegD,
+                              Compute Sub RegE RegD RegE,Store RegE (Addr (w+1)),
+                              Const 1 RegD, Store RegD (Addr (w+5)), --write dirty
                               Pop RegD, Jump (Ind RegD)]
+                              where
+                                    w = ptrWork c
 
 compileFunction c (s,xs) = compile xs c s ++ [Pop RegD, Jump (Ind RegD)]
 
@@ -275,16 +310,18 @@ debug SysState{..}
     = "Function call" ++ (show ((regbank (sprs!!0))!PC)) ++ " " ++ "\n"
   | otherwise = show ((regbank (sprs!!0))!PC) ++ " " ++
     (show ((regbank (sprs!!0))!RegA)) ++ "\n"
+
+
 link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
-          [Const (fromIntegral (256+(bs)+8)) RegC,
-           Const (fromIntegral (256+(bs))) RegA,
-           Const (fromIntegral (getTableAddress [] c)) RegD,
-           Store RegD (Deref RegA),
-           Const (fromIntegral 101) RegD,
-           Write RegD (Addr (fromIntegral 102))] ++ (compileBlocks c) ++
+          [Const (fromIntegral (getTableAddress [] c)) RegD,
+           Store RegD (Addr w),
+           Const (fromIntegral 108) RegD,
+           Const 102 RegB,
+           Write RegD (Addr (fromIntegral 101))] ++ (compileBlocks c) ++
           (compile c c []) ++ [EndProg]
       where functions = (concat $ compileFunctions c)
             bs = getTableAllocation c
+            w = fromIntegral (ptrWork c)
 
 charToOp :: Char -> Operand
 charToOp x = (RealOp x)
