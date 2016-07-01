@@ -204,27 +204,34 @@ compile ((RealOp x):xs) c s = case x of
              lock ++ loadNode c  ++ compile xs c s
 
       '?' -> [Push RegB, Load (Addr (w+2)) RegB,
-              Branch RegB (Rel 2), Jump (Rel (fromIntegral ((length lock) + 1)))]
-              ++ lock ++ --Acuire lock on next node
-             allocateSharedMem 6 ++ [Const root RegD, Write RegD (Deref RegE), --Write root type
-             Const 2 RegC, Compute Add RegC RegE RegD, Write RegB (Deref RegD), --Write next
-             Pop RegC, Push RegC, Const 3 RegD, Compute Add RegD RegE RegD,
-             Write RegC (Deref RegD), --Write previous
-             Load (Addr (w+4)) RegC, Const 4 RegD, Compute Add RegD RegE RegD,
-             Write RegC (Deref RegD), --Write begin
-             Branch RegB (Rel 2), Jump (Rel 4),
-             Const 3 RegD, Compute Add RegB RegD RegD, Write RegE (Deref RegD), --Write previous of next node
-             Store RegE (Addr (w+2)), Const 1 RegD, Store RegD (Addr (w+5)),
-             Branch RegB (Rel 2), Jump (Rel (fromIntegral ((length unlock) + 1)))] --Write next of current node + dirty flag
-             ++ unlock ++ [Pop RegB] ++ compile xs c s
+               Branch RegB (Rel 2), Jump (Rel (fromIntegral lenRelease + 8)),
+               Const 5 RegD, Compute Add RegD RegB RegD,
+               TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (fromIntegral (3+ lenRelease))),
+                 Pop RegB] ++ releaseLock ++ [Jump (Rel (fromIntegral (-lenRelease-12)))] ++
+               allocateSharedMem 6 ++ [Const root RegD, Write RegD (Deref RegE), --Write root type
+               Const 2 RegC, Compute Add RegC RegE RegD, Write RegB (Deref RegD), --Write next
+               Pop RegC, Push RegC, Const 3 RegD, Compute Add RegD RegE RegD,
+               Write RegC (Deref RegD), --Write previous
+               Load (Addr (w+4)) RegC, Const 4 RegD, Compute Add RegD RegE RegD,
+               Write RegC (Deref RegD), --Write begin
+               Branch RegB (Rel 2), Jump (Rel 4),
+               Const 3 RegD, Compute Add RegB RegD RegD, Write RegE (Deref RegD), --Write previous of next node
+               Store RegE (Addr (w+2)), Const 1 RegD, Store RegD (Addr (w+5)),
+               Branch RegB (Rel 2), Jump (Rel (fromIntegral ((length unlock) + 1)))] --Write next of current node + dirty flag
+               ++ unlock ++ [Pop RegB] ++ compile xs c s
+               where
+                 releaseLock = storeNode c ++ unlock ++ lock ++ loadNode c
+                 lenRelease = fromIntegral (length releaseLock)
+                 lenStore = fromIntegral (length (storeNode c))
+                 lenUnlock = fromIntegral (length (unlock))
 
       '!' -> [Push RegB, Load (Addr (w+3)) RegB, Branch RegB (Rel 4),
               Const 2 RegD, Write RegD (Addr 0x1000000), EndProg,
               Const 5 RegD, Compute Add RegD RegB RegD,
               TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (3+ lenRelease)),
                 Pop RegB] ++ releaseLock ++ [Jump (Rel (0-lenRelease-12)),
-              Pop RegB, Push RegB, Load (Addr (w+2)) RegB, Branch RegB (Rel 2),
-                Jump (Rel (fromIntegral (19 + lenUnlock*2 + lenStore))), --Jump to after previous set
+              Load (Addr (w+2)) RegB, Branch RegB (Rel 2), --RegB points to Node C
+                Jump (Rel (fromIntegral (20 + lenUnlock*2))), --Jump to after previous set
               Const 5 RegD, Compute Add RegD RegB RegD,
               TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (fromIntegral(6+ lenUnlock))),
                 Pop RegB, Push RegB, Load (Addr (w+3)) RegB] ++ unlock ++ [Pop RegB,
@@ -232,8 +239,8 @@ compile ((RealOp x):xs) c s = case x of
               Const 3 RegC, Compute Add RegC RegB RegD, Read (Deref RegD), Receive RegE, ---RegE points to current
               Compute Add RegC RegE RegE, Read (Deref RegE), Receive RegE, --RegE points to previous
               Write RegE (Deref RegD), --Write previous of next node
-              Compute Add Zero RegB RegC] ++ storeNode c ++ unlock ++ [
-              Pop RegB] ++ unlock ++ [Compute Add RegB Zero RegC, Load (Addr (w+3)) RegB,
+              Compute Add Zero RegB RegC] ++ unlock ++ [
+              Pop RegB, Compute Add RegB Zero RegC, Load (Addr (w+3)) RegB,
               Const 2 RegD, Compute Add RegB RegD RegE, --RegE points to prevNode next
               Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegC, --RegC contains old next
               Write RegC (Deref RegE)] ++ loadNode c --Write next to prev node
@@ -252,8 +259,8 @@ compile ((RealOp x):xs) c s = case x of
           Branch RegD (Rel ifLoopLen)] ++ ifLoop ++ compile ifLoopXs c s
       '/' -> [Const 4 RegD, Const (-4) RegC,
               Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegE,
-              Branch RegE (Rel (-3)), Const 96 RegE, Compute Sub RegD RegE RegE,
-              Branch RegE (Rel 2), Jump (Rel (-9)), --If D == 100 start over
+              Branch RegE (Rel (-3)), Const 96 RegE, Compute Sub RegC RegE RegE,
+              Branch RegE (Rel 2), Jump (Rel (-9)), --If D == 96 start over
               Const 3 RegE, Compute Add RegE RegC RegE,
               TestAndSet (Deref RegE), Receive RegE, --Take lock
               Branch RegE (Rel 2), Jump (Rel (-13)), --If lock fails, search on
@@ -282,7 +289,7 @@ compile ((RealOp x):xs) c s = case x of
             whileLoop = compile (findWhileLoop xs 0) c s
             whileLoopXs = drop (length (findWhileLoop xs 0) + 1) xs
             whileLoopLen = fromIntegral (length whileLoop + 1)
-            threadBlock = compile (findThreadBlock xs 0) c s
+            threadBlock = (compile (findThreadBlock xs 0) c s) ++ storeNode c ++ unlock
             threadBlockXs = drop (length (findThreadBlock xs 0) + 1) xs
             threadBlockLen = fromIntegral (length threadBlock + 1)
             ifLoop = compile (findIfLoop xs 0) c s
@@ -322,13 +329,14 @@ threadPool c = [Branch SPID (Rel 2), Jump (Rel lenJump), --All threads except ma
         Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegA, --Read regA
         Write Zero (Deref RegC), --Clear RegA field
         Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegB, --Read regB
+        Write Zero (Deref RegC), --Clear RegB field
         Compute Add RegD RegC RegC, Write Zero (Deref RegC), --Clear lock
         Compute Add Zero RegE RegC --Move Instruction pointer to RegC so it will surive the lock calls
         ] ++ lock ++ loadNode c ++ [Jump (Ind RegC)]
         where
           lenStore = fromIntegral (length (loadNode c))
           lenUnlock = fromIntegral (length (unlock))
-          lenJump = 46 + lenStore + lenUnlock
+          lenJump = 47 + lenStore + lenUnlock
 
 
 endProgGracefully :: [Instruction]
@@ -397,7 +405,7 @@ removeWhiteSpace (x:xs) | elem (ord x) [32, 9, 10] = removeWhiteSpace xs
 
 debug :: SystemState -> String
 debug SysState{..}
-  | ((regbank (sprs!!0))!SPID) == 0 = ""
+  | ((regbank (sprs!!0))!SPID)== 0 = ""
   | (regbank (sprs!!0))!PC == (regbank (sprs!!0))!RegD
     = "Function call" ++ (show ((regbank (sprs!!0))!PC)) ++ " " ++ "\n"
   | otherwise = show ((regbank (sprs!!0))!PC) ++ " " ++
@@ -408,8 +416,9 @@ debug SysState{..}
 debugEndProg SysState{sprs=sprs,instrs=instrs} = concat $ map isHalting sprs
     where
         isHalting SprState{regbank=regs,halted=halted}
-            | not halted
+            | not halted && spid> 0
                 = "Sprockell " ++ show spid ++ " at addr " ++ show pc ++ " RegB: " ++ (show (regs ! RegB)) ++ "\n"
+            | otherwise = ""
             where
                 pc   = regs ! PC
                 spid = regs ! SPID
@@ -436,5 +445,5 @@ main = do
   contents <- hGetContents handle
   let content = contents
   let code = map charToOp (removeWhiteSpace content)
-  run  1 (link code)
+  runDebug debugEndProg 4 (link code)
   hClose handle
