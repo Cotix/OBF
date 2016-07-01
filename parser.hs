@@ -134,9 +134,11 @@ storeNode c =[Load (Addr ((ptrWork c)+5)) RegD, Branch RegD (Rel 2),
 compile :: Code -> Code -> [Operand] -> [Instruction]
 compile [] _ _ = []
 compile ((RealOp x):xs) c s = case x of
-      ',' -> [Read (Addr 0x1000000), Receive RegD, Const b RegE, --Write type
-          Store RegE (Addr w), Store RegD (Addr (w+1)),  --Write value
-          Const 1 RegD, Store RegD (Addr (w+5))] ++ compile xs c s --Write dirty flag
+      ',' -> [Read (Addr 0x1000000), Receive RegD, Const 1 RegE,
+              Compute Add RegE RegD RegE, Branch RegE (Rel 2), Jump (Rel (-5)),
+              Const b RegE, --Write type
+              Store RegE (Addr w), Store RegD (Addr (w+1)),  --Write value
+              Const 1 RegD, Store RegD (Addr (w+5))] ++ compile xs c s --Write dirty flag
       '.' -> [Load (Addr (w+1)) RegD, Write RegD (Addr 0x1000000)] ++ compile xs c s
       '<' -> storeNode c ++ unlock ++ [Load (Addr (w+3)) RegB] ++ lock ++
                [Branch RegB (Rel 4),
