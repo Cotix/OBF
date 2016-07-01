@@ -224,7 +224,7 @@ compile ((RealOp x):xs) c s = case x of
               TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (3+ lenRelease)),
                 Pop RegB] ++ releaseLock ++ [Jump (Rel (0-lenRelease-12)),
               Pop RegB, Push RegB, Load (Addr (w+2)) RegB, Branch RegB (Rel 2),
-                Jump (Rel (fromIntegral (18 + lenUnlock*2 + lenStore))), --Jump to after previous set
+                Jump (Rel (fromIntegral (19 + lenUnlock*2 + lenStore))), --Jump to after previous set
               Const 5 RegD, Compute Add RegD RegB RegD,
               TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (fromIntegral(6+ lenUnlock))),
                 Pop RegB, Push RegB, Load (Addr (w+3)) RegB] ++ unlock ++ [Pop RegB,
@@ -233,7 +233,7 @@ compile ((RealOp x):xs) c s = case x of
               Compute Add RegC RegE RegE, Read (Deref RegE), Receive RegE, --RegE points to previous
               Write RegE (Deref RegD), --Write previous of next node
               Compute Add Zero RegB RegC] ++ storeNode c ++ unlock ++ [
-              Pop RegB, Compute Add RegB Zero RegC, Load (Addr (w+3)) RegB,
+              Pop RegB] ++ unlock ++ [Compute Add RegB Zero RegC, Load (Addr (w+3)) RegB,
               Const 2 RegD, Compute Add RegB RegD RegE, --RegE points to prevNode next
               Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegC, --RegC contains old next
               Write RegC (Deref RegE)] ++ loadNode c --Write next to prev node
@@ -410,7 +410,6 @@ debugEndProg SysState{sprs=sprs,instrs=instrs} = concat $ map isHalting sprs
         isHalting SprState{regbank=regs,halted=halted}
             | not halted
                 = "Sprockell " ++ show spid ++ " at addr " ++ show pc ++ " RegB: " ++ (show (regs ! RegB)) ++ "\n"
-            | otherwise = ""
             where
                 pc   = regs ! PC
                 spid = regs ! SPID
@@ -437,5 +436,5 @@ main = do
   contents <- hGetContents handle
   let content = contents
   let code = map charToOp (removeWhiteSpace content)
-  run 2 (link code)
+  run  1 (link code)
   hClose handle

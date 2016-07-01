@@ -4,17 +4,35 @@
 :ba:$c>[-$+$]!$: %Adds two bytes. saves in source%
 :bs:$c>[-$-$]!$: %Substracts two bytes. saves in source%
 :bm:$c>c[->$a$<]!>!$: %multiplies two bytes. saves in source%
+:bg:c>$c>$[-$-($^b$)$]$[$+$^b]!$: %Greater than comparator. Inserts new square to the right with the result. (0=true)%
 %Strings%
 :S:^*b&:
 :S+:*[>]?>b<$c>[-$+$]!$&: %Adds a character(as a byte) to the string%
 :Sa:$*[$p+$>]$: %Concatenates another string to the source%
 :Sp:*[.>]&: %prints the string%
+:d:?>|d.!:
 
-%:L:*b+~&^:%
-%:LL:*-~&^:%
+:L: *b& :
+:A: *b?>b& :
+:B: *A?>A& :
+:T: *b?>b?>b?&: % AMOUNT | A1 | A2 | SUCCESS %
+:Tx:
+    $*$*>c>[$>$-]!  %Find first account%
+    <$*~+>g(        %if account has more money than transaction amount%
+      <s>           %subtract amount from his balance%
+    )[$^b$^b]       %otherwise set amount to 0%
+    !<-              %remove result square and free the lock%
+    &&*            %pointer now points back to start of bank again%
+    $>>c>[$>$-]!d    %Find second account%
+    <<$*~+>a<-&&$&:
+
+%B?>T*+++>>+&<**~+>++<-&&@>x<**>.&>*>.&&@>x<**>.&>*>.&&@>x%
 
 
-b+++++++++++++++?>b++++++++++++++++++++++++++++++[<->-]
+:D:S*|h?>|a?>|l?>|l?>|o?>b&:
+
+%D*.>.>.>.>.<!>!.?>|o<<<.>.>.>.&%
+D?>D@<*$+p$>>>@!$?>|o!?|o$&*>>>?>|q&p
 
 
-%b??|8>>|9?>|0@  <  />?>|0@<<[.-<L>=!]\           <<[.->L<=(<[-]>)!]?>S*|e?>|i?>|n?>|d?>|e?>b&p%
+%B**>|z&>*>|z&@<T%
