@@ -56,7 +56,9 @@ findFunctionIndex (f:fs) s  | fst f == s = 1
                             | otherwise = 1 + findFunctionIndex fs s
 
 getFunctions :: Code -> [Function]
-getFunctions [] = [([RealOp 'b'], []), ([RealOp 'b', RealOp '+'], []), ([RealOp 'b', RealOp '-'], [])]
+getFunctions [] = [([RealOp 'b'], []), ([RealOp 'b', RealOp '+'], []),
+                  ([RealOp 'b', RealOp '-'], []), ([RealOp 'b', RealOp '~'], [])]
+
 getFunctions (x:xs) | x == (RealOp ':') = (fh,sh):(getFunctions r)
                     | otherwise = getFunctions xs
                       where
@@ -97,7 +99,7 @@ allocateSharedMem s =     [TestAndSet (Addr 100),
 
 lock :: [Instruction]
 lock = [Const 5 RegD, Compute Add RegD RegB RegD,
-        TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3))]
+        TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (-3))]
 
 unlock :: [Instruction]
 unlock = [Const 5 RegD, Compute Add RegD RegB RegD, Write Zero (Deref RegD)]
@@ -149,7 +151,7 @@ compile ((RealOp x):xs) c s = case x of
               Const 1 RegD, Store RegD (Addr (w+5))] --Write dirty flag
               ++ compile xs c s
       '*' -> [Load (Addr w) RegD, Const root RegE, Compute Sub RegD RegE RegD,
-          Branch RegD (Rel (fromIntegral (14 + allocSize)))]
+          Branch RegD (Rel (fromIntegral (37 + allocSize + lenStore + lenLock + lenUnlock + lenLoad)))]
           ++ (allocateSharedMem 9) ++
          [Write RegB (Deref RegE),                 --Store current node as parent
           --TMNode setup done, threadcount and lock can stay 0.
@@ -162,8 +164,19 @@ compile ((RealOp x):xs) c s = case x of
           Const 1 RegD, Store RegD (Addr (w+5)), --Set dirty flag
           Const t RegD, Store RegD (Addr w), --Set new type
           Store RegE (Addr (w+1)), --Store new TMNode as value
-          --End of setting up new chain
+          --End of setting up new chain when new tape is created
           Load (Addr (w+1)) RegD, Const 2 RegE, Compute Add RegD RegE RegD, --threadlock
+          TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3)), --Lock threadcount
+          Const 1 RegE, Compute Sub RegD RegE RegD, Read (Deref RegD), Receive RegC,
+          Compute Add RegE RegC RegC, Write RegC (Deref RegD), --Increment threadcount
+          Compute Add RegE RegD RegD, Write Zero (Deref RegD)] ++ --Free lock
+          storeNode c ++ [Push RegB] ++
+          [Load (Addr (w+1)) RegB, Const 3 RegD, Compute Add RegB RegD RegB] ++
+          lock ++ loadNode c ++ [Compute Add Zero RegB RegC, Pop RegB] ++ unlock ++
+          [Compute Add Zero RegC RegB,
+          Jump (Rel (fromIntegral (18 + lenStore + lenUnlock + lenLoad + lenLock)))] ++
+          --End of setting up new chain
+          [Load (Addr (w+1)) RegD, Const 2 RegE, Compute Add RegD RegE RegD, --threadlock
           TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3)), --Lock threadcount
           Const 1 RegE, Compute Sub RegD RegE RegD, Read (Deref RegD), Receive RegC,
           Compute Add RegE RegC RegC, Write RegC (Deref RegD), --Increment threadcount
@@ -209,9 +222,9 @@ compile ((RealOp x):xs) c s = case x of
               TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (3+ lenRelease)),
                 Pop RegB] ++ releaseLock ++ [Jump (Rel (0-lenRelease-12)),
               Pop RegB, Push RegB, Load (Addr (w+2)) RegB, Branch RegB (Rel 2),
-                Jump (Rel (18 + lenUnlock*2 + lenStore)), --Jump to after previous set
+                Jump (Rel (fromIntegral (18 + lenUnlock*2 + lenStore))), --Jump to after previous set
               Const 5 RegD, Compute Add RegD RegB RegD,
-              TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (6+ lenUnlock)),
+              TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel (fromIntegral(6+ lenUnlock))),
                 Pop RegB, Push RegB, Load (Addr (w+3)) RegB] ++ unlock ++ [Pop RegB,
                 Jump (Rel (0-15-lenUnlock-lenRelease)),
               Const 3 RegC, Compute Add RegC RegB RegD, Read (Deref RegD), Receive RegE, ---RegE points to current
@@ -221,7 +234,7 @@ compile ((RealOp x):xs) c s = case x of
               Pop RegB, Compute Add RegB Zero RegC, Load (Addr (w+3)) RegB,
               Const 2 RegD, Compute Add RegB RegD RegE, --RegE points to prevNode next
               Compute Add RegD RegC RegC, Read (Deref RegC), Receive RegC, --RegC contains old next
-              Write RegC (Deref RegE)] --Write to prev node next
+              Write RegC (Deref RegE)] ++ loadNode c --Write next to prev node
               ++ compile xs c s
               where
                 releaseLock = storeNode c ++ unlock ++ lock ++ loadNode c
@@ -279,15 +292,19 @@ compile ((RealOp x):xs) c s = case x of
             fAddress = fromIntegral (getFunctionAddress (RealOp x) c)
             w = ptrWork c
             allocSize = length (allocateSharedMem 6)
-
+            lenStore = fromIntegral (length (storeNode c))
+            lenUnlock = fromIntegral (length (unlock))
+            lenLoad = fromIntegral (length (loadNode c))
+            lenLock = fromIntegral (length (lock))
 compile ((PseudoOp x i):xs) c s = []
 
 
 threadPool :: Code -> [Instruction]
 threadPool c = [Branch SPID (Rel 2), Jump (Rel lenJump), --All threads except main thread
+        Read (Addr 99), Receive RegE, Branch RegE (Rel 2), Jump (Rel 2), EndProg,
         Const 4 RegD, Const (-4) RegC,
         Compute Add RegD RegC RegC, Const 96 RegE, Compute Sub RegC RegE RegE,
-        Branch RegE (Rel 2), Jump (Rel (-6)), --End of list, jump to beginning
+        Branch RegE (Rel 2), Jump (Rel (-11)), --End of list, jump to beginning
         Read (Deref RegC), Receive RegE, --Read Job PC
         Branch RegE (Rel (2)), Jump (Rel (-8)), --If empty, goto next iteration
         --Now lets try to claim this job!
@@ -309,7 +326,12 @@ threadPool c = [Branch SPID (Rel 2), Jump (Rel lenJump), --All threads except ma
         where
           lenStore = fromIntegral (length (loadNode c))
           lenUnlock = fromIntegral (length (unlock))
-          lenJump = 41 + lenStore + lenUnlock
+          lenJump = 46 + lenStore + lenUnlock
+
+
+endProgGracefully :: [Instruction]
+endProgGracefully = [Const 99 RegC, Write RegC (Addr 99), EndProg]
+
 
 compileFunction :: Code -> Function -> [Instruction]
 compileFunction c ([RealOp 'b'],xs) = [Const b RegD, Store RegD (Addr w),
@@ -331,6 +353,14 @@ compileFunction c ([RealOp 'b', RealOp '-'],xs)
                               Pop RegD, Jump (Ind RegD)]
                               where
                                     w = ptrWork c
+
+compileFunction c ([RealOp 'b', RealOp '~'],xs)
+                              = storeNode c ++ unlock ++ [Const 1 RegD,
+                              Compute Add RegD RegB RegD, Read (Deref RegD),
+                              Receive RegE, Branch RegE (Rel (-2))]
+                              ++ lock ++ loadNode c ++ [Pop RegD, Jump (Ind RegD)]
+
+
 
 compileFunction c (s,xs) = compile xs c s ++ [Pop RegD, Jump (Ind RegD)]
 
@@ -365,11 +395,23 @@ removeWhiteSpace (x:xs) | elem (ord x) [32, 9, 10] = removeWhiteSpace xs
 
 debug :: SystemState -> String
 debug SysState{..}
-  | (regbank (sprs!!0))!SPID == 0 = ""
+  | ((regbank (sprs!!0))!SPID) == 0 = ""
   | (regbank (sprs!!0))!PC == (regbank (sprs!!0))!RegD
     = "Function call" ++ (show ((regbank (sprs!!0))!PC)) ++ " " ++ "\n"
   | otherwise = show ((regbank (sprs!!0))!PC) ++ " " ++
     (show ((regbank (sprs!!0))!SPID)) ++ "\n"
+
+
+-- This debug function show a message when a Sprockell reaches an EndProg instruction.
+debugEndProg SysState{sprs=sprs,instrs=instrs} = concat $ map isHalting sprs
+    where
+        isHalting SprState{regbank=regs,halted=halted}
+            | not halted
+                = "Sprockell " ++ show spid ++ " at addr " ++ show pc ++ " RegB: " ++ (show (regs ! RegB)) ++ "\n"
+            | otherwise = ""
+            where
+                pc   = regs ! PC
+                spid = regs ! SPID
 
 
 link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
@@ -380,7 +422,7 @@ link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
            Const (fromIntegral 108) RegD,
            Const 102 RegB,
            Write RegD (Addr (fromIntegral 101))]  ++
-          (compile c c []) ++ [EndProg]
+          (compile c c []) ++ endProgGracefully
       where functions = (concat $ compileFunctions c)
             bs = getTableAllocation c
             w = fromIntegral (ptrWork c)
@@ -393,5 +435,5 @@ main = do
   contents <- hGetContents handle
   let content = contents
   let code = map charToOp (removeWhiteSpace content)
-  run 1 (link code)
+  run 2 (link code)
   hClose handle

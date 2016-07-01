@@ -7,11 +7,14 @@
 %Strings%
 :S:^*b&:
 :S+:*[>]?>b<$c>[-$+$]!$&: %Adds a character(as a byte) to the string%
-:Sa:$*[$+$>]$: %Concatenates another string to the source%
+:Sa:$*[$p+$>]$: %Concatenates another string to the source%
 :Sp:*[.>]&: %prints the string%
 
+%:L:*b+~&^:%
+%:LL:*-~&^:%
 
 
-%|1?>|0</[.]\>[.]%
+b+++++++++++++++?>b++++++++++++++++++++++++++++++[<->-]
 
-S*^|h?>|o?>|i?>b&?>S*^|!-?>|w?>|e?>|r?>|e?>|l?>|d?>b&@<ap
+
+%b??|8>>|9?>|0@  <  />?>|0@<<[.-<L>=!]\           <<[.->L<=(<[-]>)!]?>S*|e?>|i?>|n?>|d?>|e?>b&p%
