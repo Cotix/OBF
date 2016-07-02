@@ -10,7 +10,6 @@
 :S+:*[>]?>b<$c>[-$+$]!$&: %Adds a character(as a byte) to the string%
 :Sa:$*[$p+$>]$: %Concatenates another string to the source%
 :Sp:*[.>]&: %prints the string%
-:d:?>|d.!:
 %Simple lock%
 :L:*b&:
 :Ll:*~+&:
