@@ -3,7 +3,7 @@
 :b=:c>$c>[-$-$]!$: %Equals check with pointer. Inserts a new square right with the result and moves the pointer to the right%
 :ba:$c>[-$+$]!$: %Adds two bytes. saves in source%
 :bs:$c>[-$-$]!$: %Substracts two bytes. saves in source%
-:bm:$c>c[->$a$<]!>!$: %multiplies two bytes. saves in source%
+:bm:c^b>[-<a>]!: %multiplies two bytes. saves in source%
 :bg:c>$c>$[-$-($^b$)$]$[$+$^b]!$: %Greater than comparator. Inserts new square to the right with the result. (0=true)%
 %Strings%
 :S:^*b&:
