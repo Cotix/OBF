@@ -5,7 +5,6 @@ import System.IO.Unsafe
 import Data.Int
 import Data.Ord
 import System.IO
-import System.Environment
 import System.Environment (getArgs)
 
 type Code = [Operand]
@@ -47,9 +46,9 @@ findThreadBlock ((RealOp x):xs) c | x == '/' = (RealOp x) : (findThreadBlock xs 
                     | otherwise = (RealOp x) : (findThreadBlock xs c)
 findThreadBlock ((PseudoOp x i):xs) c =  (PseudoOp x i) : (findThreadBlock xs c)
 
-filterComments :: Code -> Code
+filterComments :: String -> String
 filterComments [] = []
-filterComments (x:xs) | x == (RealOp '%') = filterComments $ drop ((findNext xs (RealOp '%'))+1) xs
+filterComments (x:xs) | x == ('%') = filterComments $ drop ((findNext xs ('%'))+1) xs
                       | otherwise = x : (filterComments xs)
 
 findFunctionIndex :: [Function] -> [Operand] -> Int
@@ -476,6 +475,6 @@ main = do
   let fs = args
   let stl = unsafePerformIO (readFile "include/stl.obf")
   let input = concat (map  (unsafePerformIO . readFile $) (fs))
-  let c = stl ++ input
+  let c = filterComments (stl ++ input)
   let code = map charToOp (removeWhiteSpace c)
   run 3 (link code)
