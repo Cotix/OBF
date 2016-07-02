@@ -416,8 +416,8 @@ debug SysState{..}
 debugEndProg SysState{sprs=sprs,instrs=instrs} = concat $ map isHalting sprs
     where
         isHalting SprState{regbank=regs,halted=halted}
-            | not halted && spid> 0
-                = "Sprockell " ++ show spid ++ " at addr " ++ show pc ++ " RegB: " ++ (show (regs ! RegB)) ++ "\n"
+            | not halted &&  instrs!pc == (Jump (Ind RegD))
+                = "Sprockell " ++ show spid ++ " at addr " ++ show pc ++ " RegD: " ++ (show (regs ! RegD)) ++ "\n"
             | otherwise = ""
             where
                 pc   = regs ! PC
@@ -445,5 +445,5 @@ main = do
   contents <- hGetContents handle
   let content = contents
   let code = map charToOp (removeWhiteSpace content)
-  runDebug debugEndProg 8 (link code)
+  run 3 (link code)
   hClose handle
