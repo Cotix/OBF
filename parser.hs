@@ -1,21 +1,26 @@
 {-# LANGUAGE RecordWildCards #-}
 import Sprockell.System
 import Sprockell.TypesEtc
+import System.IO.Unsafe
 import Data.Int
 import Data.Ord
 import System.IO
 import System.Environment
 import Control.Monad
 import Data.Conduit
+import System.Environment (getArgs)
+
 type Code = [Operand]
 type Function = ([Operand], [Operand])
 type Op = Char
 data Operand = RealOp Char | PseudoOp String [Int] deriving (Show, Eq)
 
+findNext :: (Eq a, Num a1, Show a) => [a] -> a -> a1
 findNext [] c = error ("Could not find expected character " ++ (show c))
 findNext (x:xs) c | x == c = 0
                   | otherwise = 1 + (findNext xs c)
 
+unique :: Eq t => [t] -> [t]
 unique [] = []
 unique (x:xs) | elem x xs = unique xs
               | otherwise = x : (unique xs)
@@ -55,6 +60,8 @@ findFunctionIndex (f:fs) s  | fst f == s = 1
                             | not (elem s (map fst fs)) = 0
                             | otherwise = 1 + findFunctionIndex fs s
 
+--Returns all functions in the Code
+--We inject our default byte functions here. Since we can not define these in brainfuck
 getFunctions :: Code -> [Function]
 getFunctions [] = [([RealOp 'b'], []), ([RealOp 'b', RealOp '+'], []),
                   ([RealOp 'b', RealOp '-'], []), ([RealOp 'b', RealOp '~'], [])]
@@ -87,9 +94,12 @@ getFunctionAddress (RealOp f) c = findNext (getCallLetters c) (RealOp f)
 operandOrd :: Operand -> Int
 operandOrd (RealOp c) = ord c
 
+--Calculates the pointer to localmemory where work can be stored.
+--This has to be calculated because it is depended on the table size.
 ptrWork :: Code -> Value
 ptrWork c = fromIntegral(256 + (getTableAllocation c))
 
+--Code to allocated shared memory
 allocateSharedMem :: Int  -> [Instruction] --Allocates shared mem and stores pointer in RegE
 allocateSharedMem s =     [TestAndSet (Addr 100),
                           Receive RegE, Branch RegE (Rel 2), Jump (Rel (0-3)),
@@ -97,13 +107,16 @@ allocateSharedMem s =     [TestAndSet (Addr 100),
                           Compute Add RegD RegE RegD, Write RegD (Addr 101),
                           Const 0 RegD, Write RegD (Addr 100)]
 
+--locks the current cell
 lock :: [Instruction]
 lock = [Const 5 RegD, Compute Add RegD RegB RegD,
         TestAndSet (Deref RegD), Receive RegE, Branch RegE (Rel 2), Jump (Rel (-3))]
 
+--unlocks the current cell
 unlock :: [Instruction]
 unlock = [Const 5 RegD, Compute Add RegD RegB RegD, Write Zero (Deref RegD)]
 
+--Code to load the cell at ptrB to local memory from shared
 loadNode :: Code -> [Instruction]
 loadNode c = [Read (Deref RegB), Receive RegD, Store RegD (Addr (ptrWork c)), --Load type
               Const 1 RegD, Compute Add RegD RegB RegD,
@@ -117,6 +130,8 @@ loadNode c = [Read (Deref RegB), Receive RegD, Store RegD (Addr (ptrWork c)), --
               Const 0 RegD,
               Store RegD (Addr ((ptrWork c) + 5))] -- Store 0 to dirty flag
 
+
+--Code to save the current cell from local memory to shared
 storeNode :: Code -> [Instruction]
 storeNode c =[Load (Addr ((ptrWork c)+5)) RegD, Branch RegD (Rel 2),
               Jump (Rel 19), -- Jump over store node
@@ -131,6 +146,12 @@ storeNode c =[Load (Addr ((ptrWork c)+5)) RegD, Branch RegD (Rel 2),
               Load (Addr ((ptrWork c)+4)) RegD, Write RegD (Deref RegE) --Store begin
               ]
 
+
+--This is where the magic happens.
+--Compile looks over the code, and compiles it into assembly
+-- * ? and ! are rather long. This is because they need to lock other cells
+-- and insert or delete them. This is difficult, especially in a concurrent setting.
+-- The other functions are simpler, and should be easy to understand.
 compile :: Code -> Code -> [Operand] -> [Instruction]
 compile [] _ _ = []
 compile ((RealOp x):xs) c s = case x of
@@ -308,6 +329,11 @@ compile ((RealOp x):xs) c s = case x of
 compile ((PseudoOp x i):xs) c s = []
 
 
+--Code that additional threads will execute.
+--It basicly loops over the first 96 bytes of shared memory
+--This space is defined to be the 'joblist'
+--When it finds a job it executes it.
+--It is rather long cause it needs to be careful not to cause raceconditions
 threadPool :: Code -> [Instruction]
 threadPool c = [Branch SPID (Rel 2), Jump (Rel lenJump), --All threads except main thread
         Read (Addr 99), Receive RegE, Branch RegE (Rel 2), Jump (Rel 2), EndProg,
@@ -339,10 +365,16 @@ threadPool c = [Branch SPID (Rel 2), Jump (Rel lenJump), --All threads except ma
           lenJump = 47 + lenStore + lenUnlock
 
 
+--A graceful end, that also sets a flag in the threadpool so all threads endProg
 endProgGracefully :: [Instruction]
 endProgGracefully = [Const 99 RegC, Write RegC (Addr 99), EndProg]
 
 
+--This compiles a function into the corresponding assembly.
+--For normal functions this is just the output of regular compile + code to Jump
+--back to the function call adres.
+--However there are a few functions defined in the compiler for the byte type
+--These are defined below.
 compileFunction :: Code -> Function -> [Instruction]
 compileFunction c ([RealOp 'b'],xs) = [Const b RegD, Store RegD (Addr w),
                           Const 1 RegD, Store RegD (Addr (w+5)), --write dirty
@@ -374,56 +406,57 @@ compileFunction c ([RealOp 'b', RealOp '~'],xs)
 
 compileFunction c (s,xs) = compile xs c s ++ [Pop RegD, Jump (Ind RegD)]
 
+-- Auxiliary functions to build the function blocks
+compileFunctions :: Code -> [[Instruction]]
 compileFunctions c = map (compileFunction c ) (getFunctions c)
 
+getFunctionLengths :: Code -> [Int]
 getFunctionLengths c = map length (compileFunctions c)
 
+getFunctionOffsets' :: [Int] -> Int -> [Int]
 getFunctionOffsets' [] _ = []
 getFunctionOffsets' (x:xs) o = (o):(getFunctionOffsets' xs (o+x))
 
+getFunctionOffsets :: Code -> [Int]
 getFunctionOffsets xs = getFunctionOffsets' (getFunctionLengths xs) 1
 
+setBlock :: Int -> [Int] -> [Instruction]
 setBlock a [] = []
 setBlock a (v:vs) = [Const (fromIntegral v) RegD,
                     Store RegD (Addr(fromIntegral a))] ++ setBlock (a+1) vs
 
-
+getFunctionOffsetByIndex :: Code -> Int -> Int
 getFunctionOffsetByIndex c (-1) = -1
 getFunctionOffsetByIndex c i = (getFunctionOffsets c)!!i
 
+--makeBlock uses the auxiliary functions above to generate the instructions
+--necesary to put a block of one function into the memory
+makeBlock :: Code -> [Operand] -> [Instruction]
 makeBlock c f = setBlock (getTableAddress f c) (map ((getFunctionOffsetByIndex c)) fIndex)
                 where
                   functions = map (getFunctionByScope f (getFunctions c)) (getCallLetters c)
                   fIndex = map (+(-1)) (map (findFunctionIndex (getFunctions c)) (functions))
-
+--compileBlocks calls makeBlock on every function and returns all the instructions
+--necesary to put all the blocks into memory
+compileBlocks :: Code -> [Instruction]
 compileBlocks c = concat (map (makeBlock c) (map fst (([],[]):(getFunctions c))))
 
+removeWhiteSpace :: String -> String
 removeWhiteSpace [] = []
 removeWhiteSpace (x:xs) | elem (ord x) [32, 9, 10] = removeWhiteSpace xs
                         | otherwise = x : (removeWhiteSpace xs)
 
 
-debug :: SystemState -> String
-debug SysState{..}
-  | ((regbank (sprs!!0))!SPID)== 0 = ""
-  | (regbank (sprs!!0))!PC == (regbank (sprs!!0))!RegD
-    = "Function call" ++ (show ((regbank (sprs!!0))!PC)) ++ " " ++ "\n"
-  | otherwise = show ((regbank (sprs!!0))!PC) ++ " " ++
-    (show ((regbank (sprs!!0))!SPID)) ++ "\n"
-
-
--- This debug function show a message when a Sprockell reaches an EndProg instruction.
-debugEndProg SysState{sprs=sprs,instrs=instrs} = concat $ map isHalting sprs
-    where
-        isHalting SprState{regbank=regs,halted=halted}
-            | not halted &&  instrs!pc == (Jump (Ind RegD))
-                = "Sprockell " ++ show spid ++ " at addr " ++ show pc ++ " RegD: " ++ (show (regs ! RegD)) ++ "\n"
-            | otherwise = ""
-            where
-                pc   = regs ! PC
-                spid = regs ! SPID
-
-
+--Link combines everything and outputs the final runnable program.
+--The structure of a program is as follows:
+--  JUMP REL (functionsize)     Jump over all function definitions
+--  functions
+--  Storing the blocks into mem <-- entry point
+--  Start thread pool    <-- thread 0 jumps over the threadPool
+--  Some initial code to setup the first block
+--  Start main code
+--  Graceful end that also kills all threads.
+link :: Code -> [Instruction]
 link c = [Jump (Rel (fromIntegral((length functions)+1)))] ++ functions ++
           compileBlocks c ++
           threadPool c ++
@@ -441,9 +474,10 @@ charToOp :: Char -> Operand
 charToOp x = (RealOp x)
 
 main = do
-  handle <- openFile "include/stl.obf" ReadMode
-  contents <- hGetContents handle
-  let content = contents
-  let code = map charToOp (removeWhiteSpace content)
+  args <- getArgs
+  let fs = args
+  let stl = unsafePerformIO (readFile "include/stl.obf")
+  let input = concat (map  (unsafePerformIO . readFile $) (fs))
+  let c = stl ++ input
+  let code = map charToOp (removeWhiteSpace c)
   run 3 (link code)
-  hClose handle
