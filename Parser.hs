@@ -299,6 +299,8 @@ compile ((RealOp x):xs) c s = case x of
       '%' -> compile comment c s
       _ -> [Load (Addr w) RegD, Const fAddress RegE,
           Compute Add RegE RegD RegD, Load (Deref RegD) RegD,
+          Compute LtE Zero RegD RegE, Branch RegE (Rel 4),
+          Const 3 RegD, Write RegD (Addr 0x1000000), EndProg,
           Const 3 RegE, Compute Add RegE PC RegE, Push RegE,
           Jump (Ind RegD)] ++ compile xs c s
       where b = fromIntegral (getTableAddress [RealOp 'b'] c)
