@@ -445,5 +445,5 @@ main = do
   contents <- hGetContents handle
   let content = contents
   let code = map charToOp (removeWhiteSpace content)
-  runDebug debugEndProg 4 (link code)
+  runDebug debugEndProg 8 (link code)
   hClose handle
