@@ -6,8 +6,6 @@ import Data.Int
 import Data.Ord
 import System.IO
 import System.Environment
-import Control.Monad
-import Data.Conduit
 import System.Environment (getArgs)
 
 type Code = [Operand]
