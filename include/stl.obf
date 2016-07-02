@@ -11,7 +11,7 @@
 :Sa:$*[$p+$>]$: %Concatenates another string to the source%
 :Sp:*[.>]&: %prints the string%
 %Simple lock%
-:L:*b&:
+:L:^*b&:
 :Ll:*~+&:
 :Lu:*^b&:
 
